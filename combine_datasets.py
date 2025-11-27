@@ -1,8 +1,8 @@
 import pandas as pd
 
 # Read the CSV files
-mat = pd.read_csv('student-mat.csv')
-por = pd.read_csv('student-por.csv')
+mat = pd.read_csv('datasets/student-mat.csv')
+por = pd.read_csv('datasets/student-por.csv')
 
 # Define the columns that identify unique students
 key_cols = [
