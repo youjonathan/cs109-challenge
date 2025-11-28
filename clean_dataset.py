@@ -1,9 +1,9 @@
 import pandas as pd
 
-dataset = pd.read_csv('dataset.csv')
+dataset = pd.read_csv('full_dataset.csv')
 
 # Define the columns to be removed
-remove_cols = ['school', 'guardian', 'traveltime', 'schoolsup', 'famsup', 'paid', 'nursery', 'internet', 'famrel', 'freetime', 'absences', 'G1', 'G2']
+remove_cols = ['school', 'reason', 'guardian', 'traveltime', 'schoolsup', 'famsup', 'paid', 'nursery', 'higher', 'internet', 'famrel', 'freetime', 'absences', 'G1', 'G2']
 
 # Drop the specified columns from the dataset
 cleaned_dataset = dataset.drop(columns=remove_cols)
