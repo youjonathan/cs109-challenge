@@ -1,451 +1,626 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>How Cooked Am I?</title>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>How Cooked Am I?</title>
 
-  <!-- TailwindCSS via CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
+    <!-- TailwindCSS via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- React + ReactDOM via CDN -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- React + ReactDOM via CDN -->
+    <script
+      crossorigin
+      src="https://unpkg.com/react@18/umd/react.development.js"
+    ></script>
+    <script
+      crossorigin
+      src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"
+    ></script>
 
-  <!-- Babel for JSX support -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-</head>
+    <!-- Babel for JSX support -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  </head>
 
-<body class="bg-gray-100">
+  <body class="bg-gray-100">
+    <!-- Root div where React will be mounted -->
+    <div id="root"></div>
 
-  <!-- Root div where React will be mounted -->
-  <div id="root"></div>
+    <!-- React application -->
+    <script type="text/babel">
+      async function loadModel() {
+        const res = await fetch("./model.json");
+        if (!res.ok) {
+          throw new Error("Failed to load model.json");
+        }
+        return await res.json();
+      }
 
-  <!-- React application -->
-<script type="text/babel">
-  function App() {
-    const [form, setForm] = React.useState({
-      sex: "",
-      age: "",
-      address: "",
-      famsize: "",
-      Pstatus: "",
-      Medu: "",
-      Fedu: "",
-      Mjob: "",
-      Fjob: "",
-      studytime: "",
-      failures: "",
-      activities: false,
-      romantic: false,
-      goout: "",
-      Dalc: "",
-      Walc: "",
-      health: "",
-    });
+      function predictGrade(rawFeatures, model) {
+        const { scaler_mean, scaler_scale, coefficients, intercept } = model;
 
-    const [prediction, setPrediction] = React.useState(null);
+        const n = rawFeatures.length;
+        let linear = intercept;
 
-    function updateField(name, value) {
-      setForm((prev) => ({ ...prev, [name]: value }));
-    }
+        for (let i = 0; i < n; i++) {
+          const x = rawFeatures[i];
 
-    function handleSubmit(e) {
-      e.preventDefault();
+          // If feature is missing (null/undefined/NaN), treat as mean → standardized value = 0
+          if (x == null || Number.isNaN(x)) {
+            continue;
+          }
 
-      // TODO: replace this with your real ML logic
-      const dummyPrediction = 12.3;
-      setPrediction(dummyPrediction);
-    }
+          const mean = scaler_mean[i];
+          const scale = scaler_scale[i] || 1; // avoid divide by zero
+          const xScaled = (x - mean) / scale;
 
-    const alcoholMissing = !form.Dalc || !form.Walc;
+          linear += coefficients[i] * xScaled;
+        }
 
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
-        <div className="bg-white shadow-xl rounded-2xl p-8 max-w-3xl w-full">
-          <h1 className="text-3xl font-bold text-gray-800 text-center">
-            How Cooked Am I?
-          </h1>
-          <p className="text-gray-600 mt-2 text-center">
-            A not-very-serious model that estimates your final exam score based on your habits.
-          </p>
+        // Clamp to [0, 20] just to be safe
+        if (linear < 0) linear = 0;
+        if (linear > 20) linear = 20;
 
-          <form onSubmit={handleSubmit} className="mt-6 space-y-6">
-            {/* Alcohol (required) */}
-            <section>
-              <h2 className="text-xl font-semibold text-gray-800 mb-2">
-                Alcohol Consumption{" "}
-                <span className="text-red-500 text-sm">(required)</span>
-              </h2>
-              <p className="text-sm text-gray-500 mb-3">
-                These are the only required questions. Everything else below is optional.
+        return linear;
+      }
+
+      function encodeFormToFeatures(form, model) {
+        const { feature_order } = model;
+        const features = new Array(feature_order.length);
+
+        for (let i = 0; i < feature_order.length; i++) {
+          const name = feature_order[i];
+          let value = null;
+
+          switch (name) {
+            case "sex":
+              // F -> 0, M -> 1
+              if (form.sex === "M") value = 1;
+              else if (form.sex === "F") value = 0;
+              break;
+
+            case "age":
+              value = form.age ? Number(form.age) : null;
+              break;
+
+            case "address":
+              // U -> 0, R -> 1
+              if (form.address === "R") value = 1;
+              else if (form.address === "U") value = 0;
+              break;
+
+            case "famsize":
+              // LE3 -> 0, GT3 -> 1
+              if (form.famsize === "GT3") value = 1;
+              else if (form.famsize === "LE3") value = 0;
+              break;
+
+            case "Pstatus":
+              // T -> 0, A -> 1
+              if (form.Pstatus === "A") value = 1;
+              else if (form.Pstatus === "T") value = 0;
+              break;
+
+            case "Medu":
+            case "Fedu":
+            case "studytime":
+            case "failures":
+            case "goout":
+            case "Dalc":
+            case "Walc":
+            case "health":
+              value = form[name] ? Number(form[name]) : null;
+              break;
+
+            case "activities":
+              // yes -> 1, no -> 0; checkbox default false means 0
+              value = form.activities ? 1 : 0;
+              break;
+
+            case "romantic":
+              value = form.romantic ? 1 : 0;
+              break;
+
+            // ----- Mjob one-hot -----
+            case "Mjob_health":
+              value = form.Mjob === "health" ? 1 : 0;
+              break;
+            case "Mjob_other":
+              value = form.Mjob === "other" ? 1 : 0;
+              break;
+            case "Mjob_services":
+              value = form.Mjob === "services" ? 1 : 0;
+              break;
+            case "Mjob_teacher":
+              value = form.Mjob === "teacher" ? 1 : 0;
+              break;
+            // (Mjob 'at_home' or blank -> all zeros, which matches how it was encoded)
+
+            // ----- Fjob one-hot -----
+            case "Fjob_health":
+              value = form.Fjob === "health" ? 1 : 0;
+              break;
+            case "Fjob_other":
+              value = form.Fjob === "other" ? 1 : 0;
+              break;
+            case "Fjob_services":
+              value = form.Fjob === "services" ? 1 : 0;
+              break;
+            case "Fjob_teacher":
+              value = form.Fjob === "teacher" ? 1 : 0;
+              break;
+            // (Fjob 'at_home' or blank -> all zeros)
+
+            default:
+              value = null;
+          }
+
+          features[i] = value;
+        }
+
+        return features;
+      }
+
+      function App() {
+        const [form, setForm] = React.useState({
+          sex: "",
+          age: "",
+          address: "",
+          famsize: "",
+          Pstatus: "",
+          Medu: "",
+          Fedu: "",
+          Mjob: "",
+          Fjob: "",
+          studytime: "",
+          failures: "",
+          activities: false,
+          romantic: false,
+          goout: "",
+          Dalc: "",
+          Walc: "",
+          health: "",
+        });
+
+        const [model, setModel] = React.useState(null);
+        const [prediction, setPrediction] = React.useState(null);
+
+        // Load model.json on mount
+        React.useEffect(() => {
+          loadModel()
+            .then(setModel)
+            .catch((err) => {
+              console.error(err);
+              alert("Failed to load model. Try refreshing the page.");
+            });
+        }, []);
+
+        function updateField(name, value) {
+          setForm((prev) => ({ ...prev, [name]: value }));
+        }
+
+        const alcoholMissing = !form.Dalc || !form.Walc;
+
+        function handleSubmit(e) {
+          e.preventDefault();
+          if (!model) {
+            alert("Model not loaded yet. Please wait a moment and try again.");
+            return;
+          }
+
+          // Build raw feature vector in the correct order
+          const rawFeatures = encodeFormToFeatures(form, model);
+
+          // Use linear regression to predict
+          const grade = predictGrade(rawFeatures, model);
+
+          setPrediction(grade);
+        }
+
+        return (
+          <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+            <div className="bg-white shadow-xl rounded-2xl p-8 max-w-3xl w-full">
+              <h1 className="text-3xl font-bold text-gray-800 text-center">
+                How Cooked Am I?
+              </h1>
+              <p className="text-gray-600 mt-2 text-center">
+                A not-very-serious model that estimates your final exam score
+                based on your habits.
               </p>
-              <div className="grid sm:grid-cols-2 gap-4">
-                {/* Dalc */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Workday alcohol (Dalc)
-                  </label>
-                  <select
-                    value={form.Dalc}
-                    onChange={(e) => updateField("Dalc", e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-                    required
+
+              <form onSubmit={handleSubmit} className="mt-6 space-y-6">
+                {/* Alcohol (required) */}
+                <section>
+                  <h2 className="text-xl font-semibold text-gray-800 mb-2">
+                    Alcohol Consumption{" "}
+                    <span className="text-red-500 text-sm">(required)</span>
+                  </h2>
+                  <p className="text-sm text-gray-500 mb-3">
+                    These are the only required questions. Everything else below
+                    is optional.
+                  </p>
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    {/* Dalc */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Workday alcohol (Dalc)
+                      </label>
+                      <select
+                        value={form.Dalc}
+                        onChange={(e) => updateField("Dalc", e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+                        required
+                      >
+                        <option value="">Select...</option>
+                        <option value="1">1 - Very low</option>
+                        <option value="2">2 - Low</option>
+                        <option value="3">3 - Moderate</option>
+                        <option value="4">4 - High</option>
+                        <option value="5">5 - Very high</option>
+                      </select>
+                    </div>
+
+                    {/* Walc */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Weekend alcohol (Walc)
+                      </label>
+                      <select
+                        value={form.Walc}
+                        onChange={(e) => updateField("Walc", e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+                        required
+                      >
+                        <option value="">Select...</option>
+                        <option value="1">1 - Very low</option>
+                        <option value="2">2 - Low</option>
+                        <option value="3">3 - Moderate</option>
+                        <option value="4">4 - High</option>
+                        <option value="5">5 - Very high</option>
+                      </select>
+                    </div>
+                  </div>
+                </section>
+
+                {/* Demographics */}
+                <section>
+                  <h2 className="text-xl font-semibold text-gray-800 mb-2">
+                    Demographics{" "}
+                    <span className="text-gray-400 text-sm">(optional)</span>
+                  </h2>
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    {/* Sex */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Sex
+                      </label>
+                      <select
+                        value={form.sex}
+                        onChange={(e) => updateField("sex", e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+                      >
+                        <option value="">Prefer not to say</option>
+                        <option value="F">Female</option>
+                        <option value="M">Male</option>
+                      </select>
+                    </div>
+
+                    {/* Age */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Age
+                      </label>
+                      <input
+                        type="number"
+                        min="15"
+                        max="25"
+                        value={form.age}
+                        onChange={(e) => updateField("age", e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+                        placeholder="e.g., 18"
+                      />
+                    </div>
+
+                    {/* Address */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Home address
+                      </label>
+                      <select
+                        value={form.address}
+                        onChange={(e) => updateField("address", e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+                      >
+                        <option value="">Select...</option>
+                        <option value="U">Urban (U)</option>
+                        <option value="R">Rural (R)</option>
+                      </select>
+                    </div>
+
+                    {/* Famsize */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Family size
+                      </label>
+                      <select
+                        value={form.famsize}
+                        onChange={(e) => updateField("famsize", e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+                      >
+                        <option value="">Select...</option>
+                        <option value="LE3">≤ 3 people (LE3)</option>
+                        <option value="GT3">&gt; 3 people (GT3)</option>
+                      </select>
+                    </div>
+
+                    {/* Pstatus */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Parents' cohabitation (Pstatus)
+                      </label>
+                      <select
+                        value={form.Pstatus}
+                        onChange={(e) => updateField("Pstatus", e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+                      >
+                        <option value="">Select...</option>
+                        <option value="T">Together (T)</option>
+                        <option value="A">Apart (A)</option>
+                      </select>
+                    </div>
+                  </div>
+                </section>
+
+                {/* Parents' education & jobs */}
+                <section>
+                  <h2 className="text-xl font-semibold text-gray-800 mb-2">
+                    Parents & Education{" "}
+                    <span className="text-gray-400 text-sm">(optional)</span>
+                  </h2>
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    {/* Medu */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Mother's education (Medu)
+                      </label>
+                      <select
+                        value={form.Medu}
+                        onChange={(e) => updateField("Medu", e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+                      >
+                        <option value="">Select...</option>
+                        <option value="0">0 - None</option>
+                        <option value="1">1 - Primary (4th grade)</option>
+                        <option value="2">2 - 5th–9th grade</option>
+                        <option value="3">3 - Secondary</option>
+                        <option value="4">4 - Higher education</option>
+                      </select>
+                    </div>
+
+                    {/* Fedu */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Father's education (Fedu)
+                      </label>
+                      <select
+                        value={form.Fedu}
+                        onChange={(e) => updateField("Fedu", e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+                      >
+                        <option value="">Select...</option>
+                        <option value="0">0 - None</option>
+                        <option value="1">1 - Primary (4th grade)</option>
+                        <option value="2">2 - 5th–9th grade</option>
+                        <option value="3">3 - Secondary</option>
+                        <option value="4">4 - Higher education</option>
+                      </select>
+                    </div>
+
+                    {/* Mjob */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Mother's job (Mjob)
+                      </label>
+                      <select
+                        value={form.Mjob}
+                        onChange={(e) => updateField("Mjob", e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+                      >
+                        <option value="">Select...</option>
+                        <option value="teacher">Teacher</option>
+                        <option value="health">Health</option>
+                        <option value="services">Civil services</option>
+                        <option value="at_home">At home</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
+
+                    {/* Fjob */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Father's job (Fjob)
+                      </label>
+                      <select
+                        value={form.Fjob}
+                        onChange={(e) => updateField("Fjob", e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+                      >
+                        <option value="">Select...</option>
+                        <option value="teacher">Teacher</option>
+                        <option value="health">Health</option>
+                        <option value="services">Civil services</option>
+                        <option value="at_home">At home</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
+                  </div>
+                </section>
+
+                {/* Study & social */}
+                <section>
+                  <h2 className="text-xl font-semibold text-gray-800 mb-2">
+                    Study & Social Life{" "}
+                    <span className="text-gray-400 text-sm">(optional)</span>
+                  </h2>
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    {/* Studytime */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Weekly study time (studytime)
+                      </label>
+                      <select
+                        value={form.studytime}
+                        onChange={(e) =>
+                          updateField("studytime", e.target.value)
+                        }
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+                      >
+                        <option value="">Select...</option>
+                        <option value="1">1 - &lt; 2 hours</option>
+                        <option value="2">2 - 2–5 hours</option>
+                        <option value="3">3 - 5–10 hours</option>
+                        <option value="4">4 - &gt; 10 hours</option>
+                      </select>
+                    </div>
+
+                    {/* Failures */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Past class failures (failures)
+                      </label>
+                      <select
+                        value={form.failures}
+                        onChange={(e) =>
+                          updateField("failures", e.target.value)
+                        }
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+                      >
+                        <option value="">Select...</option>
+                        <option value="0">0</option>
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4 or more</option>
+                      </select>
+                    </div>
+
+                    {/* Activities */}
+                    <div className="sm:col-span-2 flex items-center gap-2 mt-1">
+                      <input
+                        id="activities"
+                        type="checkbox"
+                        checked={form.activities}
+                        onChange={(e) =>
+                          updateField("activities", e.target.checked)
+                        }
+                        className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                      />
+                      <label
+                        htmlFor="activities"
+                        className="text-sm text-gray-700"
+                      >
+                        I participate in extra-curricular activities
+                        (activities)
+                      </label>
+                    </div>
+
+                    {/* Romantic */}
+                    <div className="sm:col-span-2 flex items-center gap-2 mt-1">
+                      <input
+                        id="romantic"
+                        type="checkbox"
+                        checked={form.romantic}
+                        onChange={(e) =>
+                          updateField("romantic", e.target.checked)
+                        }
+                        className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                      />
+                      <label
+                        htmlFor="romantic"
+                        className="text-sm text-gray-700"
+                      >
+                        I am in a romantic relationship (romantic)
+                      </label>
+                    </div>
+
+                    {/* Goout */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Going out with friends (goout)
+                      </label>
+                      <select
+                        value={form.goout}
+                        onChange={(e) => updateField("goout", e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+                      >
+                        <option value="">Select...</option>
+                        <option value="1">1 - Very low</option>
+                        <option value="2">2 - Low</option>
+                        <option value="3">3 - Moderate</option>
+                        <option value="4">4 - High</option>
+                        <option value="5">5 - Very high</option>
+                      </select>
+                    </div>
+
+                    {/* Health */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Current health (health)
+                      </label>
+                      <select
+                        value={form.health}
+                        onChange={(e) => updateField("health", e.target.value)}
+                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
+                      >
+                        <option value="">Select...</option>
+                        <option value="1">1 - Very bad</option>
+                        <option value="2">2 - Bad</option>
+                        <option value="3">3 - Average</option>
+                        <option value="4">4 - Good</option>
+                        <option value="5">5 - Very good</option>
+                      </select>
+                    </div>
+                  </div>
+                </section>
+
+                {/* Submit */}
+                <div className="pt-4 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <button
+                    type="submit"
+                    disabled={alcoholMissing}
+                    className={`w-full sm:w-auto px-5 py-2 rounded-lg font-semibold text-white ${
+                      alcoholMissing
+                        ? "bg-gray-400 cursor-not-allowed"
+                        : "bg-blue-600 hover:bg-blue-700"
+                    }`}
                   >
-                    <option value="">Select...</option>
-                    <option value="1">1 - Very low</option>
-                    <option value="2">2 - Low</option>
-                    <option value="3">3 - Moderate</option>
-                    <option value="4">4 - High</option>
-                    <option value="5">5 - Very high</option>
-                  </select>
+                    Predict my final grade
+                  </button>
+                  <p className="text-xs text-gray-500 text-center sm:text-right">
+                    This is a rough estimate based on a small dataset. Please
+                    don’t plan your life around it 🙂
+                  </p>
                 </div>
+              </form>
 
-                {/* Walc */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Weekend alcohol (Walc)
-                  </label>
-                  <select
-                    value={form.Walc}
-                    onChange={(e) => updateField("Walc", e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-                    required
-                  >
-                    <option value="">Select...</option>
-                    <option value="1">1 - Very low</option>
-                    <option value="2">2 - Low</option>
-                    <option value="3">3 - Moderate</option>
-                    <option value="4">4 - High</option>
-                    <option value="5">5 - Very high</option>
-                  </select>
+              {/* Result */}
+              {prediction !== null && (
+                <div className="mt-6 p-4 rounded-lg bg-green-50 border border-green-200 text-center">
+                  <p className="text-sm text-green-800 font-medium">
+                    Estimated final exam grade:
+                  </p>
+                  <p className="text-3xl font-bold text-green-700 mt-1">
+                    {(prediction * 5).toFixed(1)}%
+                  </p>
                 </div>
-              </div>
-            </section>
-
-            {/* Demographics */}
-            <section>
-              <h2 className="text-xl font-semibold text-gray-800 mb-2">
-                Demographics <span className="text-gray-400 text-sm">(optional)</span>
-              </h2>
-              <div className="grid sm:grid-cols-2 gap-4">
-                {/* Sex */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Sex
-                  </label>
-                  <select
-                    value={form.sex}
-                    onChange={(e) => updateField("sex", e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-                  >
-                    <option value="">Prefer not to say</option>
-                    <option value="F">Female</option>
-                    <option value="M">Male</option>
-                  </select>
-                </div>
-
-                {/* Age */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Age
-                  </label>
-                  <input
-                    type="number"
-                    min="15"
-                    max="25"
-                    value={form.age}
-                    onChange={(e) => updateField("age", e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-                    placeholder="e.g., 18"
-                  />
-                </div>
-
-                {/* Address */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Home address
-                  </label>
-                  <select
-                    value={form.address}
-                    onChange={(e) => updateField("address", e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-                  >
-                    <option value="">Select...</option>
-                    <option value="U">Urban (U)</option>
-                    <option value="R">Rural (R)</option>
-                  </select>
-                </div>
-
-                {/* Famsize */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Family size
-                  </label>
-                  <select
-                    value={form.famsize}
-                    onChange={(e) => updateField("famsize", e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-                  >
-                    <option value="">Select...</option>
-                    <option value="LE3">≤ 3 people (LE3)</option>
-                    <option value="GT3">&gt; 3 people (GT3)</option>
-                  </select>
-                </div>
-
-                {/* Pstatus */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Parents' cohabitation (Pstatus)
-                  </label>
-                  <select
-                    value={form.Pstatus}
-                    onChange={(e) => updateField("Pstatus", e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-                  >
-                    <option value="">Select...</option>
-                    <option value="T">Together (T)</option>
-                    <option value="A">Apart (A)</option>
-                  </select>
-                </div>
-              </div>
-            </section>
-
-            {/* Parents' education & jobs */}
-            <section>
-              <h2 className="text-xl font-semibold text-gray-800 mb-2">
-                Parents & Education <span className="text-gray-400 text-sm">(optional)</span>
-              </h2>
-              <div className="grid sm:grid-cols-2 gap-4">
-                {/* Medu */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Mother's education (Medu)
-                  </label>
-                  <select
-                    value={form.Medu}
-                    onChange={(e) => updateField("Medu", e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-                  >
-                    <option value="">Select...</option>
-                    <option value="0">0 - None</option>
-                    <option value="1">1 - Primary (4th grade)</option>
-                    <option value="2">2 - 5th–9th grade</option>
-                    <option value="3">3 - Secondary</option>
-                    <option value="4">4 - Higher education</option>
-                  </select>
-                </div>
-
-                {/* Fedu */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Father's education (Fedu)
-                  </label>
-                  <select
-                    value={form.Fedu}
-                    onChange={(e) => updateField("Fedu", e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-                  >
-                    <option value="">Select...</option>
-                    <option value="0">0 - None</option>
-                    <option value="1">1 - Primary (4th grade)</option>
-                    <option value="2">2 - 5th–9th grade</option>
-                    <option value="3">3 - Secondary</option>
-                    <option value="4">4 - Higher education</option>
-                  </select>
-                </div>
-
-                {/* Mjob */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Mother's job (Mjob)
-                  </label>
-                  <select
-                    value={form.Mjob}
-                    onChange={(e) => updateField("Mjob", e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-                  >
-                    <option value="">Select...</option>
-                    <option value="teacher">Teacher</option>
-                    <option value="health">Health</option>
-                    <option value="services">Civil services</option>
-                    <option value="at_home">At home</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-
-                {/* Fjob */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Father's job (Fjob)
-                  </label>
-                  <select
-                    value={form.Fjob}
-                    onChange={(e) => updateField("Fjob", e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-                  >
-                    <option value="">Select...</option>
-                    <option value="teacher">Teacher</option>
-                    <option value="health">Health</option>
-                    <option value="services">Civil services</option>
-                    <option value="at_home">At home</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-              </div>
-            </section>
-
-            {/* Study & social */}
-            <section>
-              <h2 className="text-xl font-semibold text-gray-800 mb-2">
-                Study & Social Life <span className="text-gray-400 text-sm">(optional)</span>
-              </h2>
-              <div className="grid sm:grid-cols-2 gap-4">
-                {/* Studytime */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Weekly study time (studytime)
-                  </label>
-                  <select
-                    value={form.studytime}
-                    onChange={(e) => updateField("studytime", e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-                  >
-                    <option value="">Select...</option>
-                    <option value="1">1 - &lt; 2 hours</option>
-                    <option value="2">2 - 2–5 hours</option>
-                    <option value="3">3 - 5–10 hours</option>
-                    <option value="4">4 - &gt; 10 hours</option>
-                  </select>
-                </div>
-
-                {/* Failures */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Past class failures (failures)
-                  </label>
-                  <select
-                    value={form.failures}
-                    onChange={(e) => updateField("failures", e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-                  >
-                    <option value="">Select...</option>
-                    <option value="0">0</option>
-                    <option value="1">1</option>
-                    <option value="2">2</option>
-                    <option value="3">3</option>
-                    <option value="4">4 or more</option>
-                  </select>
-                </div>
-
-                {/* Activities */}
-                <div className="sm:col-span-2 flex items-center gap-2 mt-1">
-                  <input
-                    id="activities"
-                    type="checkbox"
-                    checked={form.activities}
-                    onChange={(e) => updateField("activities", e.target.checked)}
-                    className="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                  />
-                  <label htmlFor="activities" className="text-sm text-gray-700">
-                    I participate in extra-curricular activities (activities)
-                  </label>
-                </div>
-
-                {/* Romantic */}
-                <div className="sm:col-span-2 flex items-center gap-2 mt-1">
-                  <input
-                    id="romantic"
-                    type="checkbox"
-                    checked={form.romantic}
-                    onChange={(e) => updateField("romantic", e.target.checked)}
-                    className="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                  />
-                  <label htmlFor="romantic" className="text-sm text-gray-700">
-                    I am in a romantic relationship (romantic)
-                  </label>
-                </div>
-
-                {/* Goout */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Going out with friends (goout)
-                  </label>
-                  <select
-                    value={form.goout}
-                    onChange={(e) => updateField("goout", e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-                  >
-                    <option value="">Select...</option>
-                    <option value="1">1 - Very low</option>
-                    <option value="2">2 - Low</option>
-                    <option value="3">3 - Moderate</option>
-                    <option value="4">4 - High</option>
-                    <option value="5">5 - Very high</option>
-                  </select>
-                </div>
-
-                {/* Health */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Current health (health)
-                  </label>
-                  <select
-                    value={form.health}
-                    onChange={(e) => updateField("health", e.target.value)}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-200"
-                  >
-                    <option value="">Select...</option>
-                    <option value="1">1 - Very bad</option>
-                    <option value="2">2 - Bad</option>
-                    <option value="3">3 - Average</option>
-                    <option value="4">4 - Good</option>
-                    <option value="5">5 - Very good</option>
-                  </select>
-                </div>
-              </div>
-            </section>
-
-            {/* Submit */}
-            <div className="pt-4 border-t border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-3">
-              <button
-                type="submit"
-                disabled={alcoholMissing}
-                className={`w-full sm:w-auto px-5 py-2 rounded-lg font-semibold text-white ${
-                  alcoholMissing
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-blue-600 hover:bg-blue-700"
-                }`}
-              >
-                Predict my final grade
-              </button>
-              <p className="text-xs text-gray-500 text-center sm:text-right">
-                This is a rough estimate based on a small dataset. Please don’t plan your life around it 🙂
-              </p>
+              )}
             </div>
-          </form>
+          </div>
+        );
+      }
 
-          {/* Result */}
-          {prediction !== null && (
-            <div className="mt-6 p-4 rounded-lg bg-green-50 border border-green-200 text-center">
-              <p className="text-sm text-green-800 font-medium">
-                Estimated final exam grade:
-              </p>
-              <p className="text-3xl font-bold text-green-700 mt-1">
-                {prediction.toFixed(2)} / 20
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  const root = ReactDOM.createRoot(document.getElementById("root"));
-  root.render(<App />);
-</script>
-
-
-
-</body>
+      const root = ReactDOM.createRoot(document.getElementById("root"));
+      root.render(<App />);
+    </script>
+  </body>
 </html>

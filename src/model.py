@@ -36,3 +36,12 @@ with open('../docs/model.json', 'w') as f:
 
 print('Model exported to ../docs/model.json')
 print('Number of features:', len(feature_order))
+
+i = 6  # example row
+x_row = df.drop(columns=["G3"]).iloc[i:i+1]   # DataFrame with 1 row
+y_true = df["G3"].iloc[i]
+print(x_row)
+print(y_true)
+X_scaled = scaler.transform(x_row.values)
+y_pred = model.predict(X_scaled)[0]
+print(y_true, y_pred)
